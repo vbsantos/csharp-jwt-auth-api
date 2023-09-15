@@ -6,6 +6,7 @@ using System.Text;
 
 using BCrypt.Net;
 
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 
@@ -36,11 +37,35 @@ public class AuthController : ControllerBase
     var newUser = new User
     {
       Username = request.Username,
-      PasswordHash = BCrypt.HashPassword(request.Password)
+      PasswordHash = BCrypt.HashPassword(request.Password),
+      IsAdmin = false
     };
     RegistredUsers.Add(newUser);
 
-    return Ok(newUser);
+    return Ok();
+  }
+
+  [HttpPost("RegisterAdmin")]
+  public IActionResult RegisterAdmin(UserViewModel request)
+  {
+    if (string.IsNullOrWhiteSpace(request.Username) || request.Username.Length < 4)
+      return BadRequest("Invalid Username.");
+
+    if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 4)
+      return BadRequest("Invalid Password.");
+
+    if (RegistredUsers.Any(user => user.Username == request.Username))
+      return BadRequest("Username is already taken.");
+
+    var newUser = new User
+    {
+      Username = request.Username,
+      PasswordHash = BCrypt.HashPassword(request.Password),
+      IsAdmin = true
+    };
+    RegistredUsers.Add(newUser);
+
+    return Ok();
   }
 
   [HttpPost("Login")]
@@ -54,22 +79,56 @@ public class AuthController : ControllerBase
 
     var user = RegistredUsers.Find(user => user.Username == request.Username);
     if (user is null)
-      return NotFound("User not found.");
+      return NotFound("Username doesn't exist.");
 
     if (!BCrypt.Verify(request.Password, user.PasswordHash))
-      return BadRequest("Wrong password");
+      return Unauthorized();
 
-    var token = GenerateJwtToken(user.Username);
+    var token = GenerateJwtToken(user.Username, user.IsAdmin);
 
-    return Ok(token);
+    Response.Cookies.Append("access_token", token, new CookieOptions
+    {
+      HttpOnly = true,
+      Secure = true,
+      SameSite = SameSiteMode.Strict
+    });
+
+    return Ok();
   }
 
-  private string GenerateJwtToken(string username)
+  [HttpPost("LoginApi")]
+  public IActionResult LoginApi(UserViewModel request)
+  {
+    if (string.IsNullOrWhiteSpace(request.Username) || request.Username.Length < 4)
+      return BadRequest("Invalid Username.");
+
+    if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 4)
+      return BadRequest("Invalid Password.");
+
+    var user = RegistredUsers.Find(user => user.Username == request.Username);
+    if (user is null)
+      return NotFound("Username doesn't exist.");
+
+    if (!BCrypt.Verify(request.Password, user.PasswordHash))
+      return Unauthorized();
+
+    var token = GenerateJwtToken(user.Username, user.IsAdmin);
+
+    return Ok(new { Token = token });
+  }
+
+  [HttpGet("Users"), Authorize(Roles = "Admin")]
+  public IActionResult GetDefaultUsers()
+  {
+    return Ok(RegistredUsers.Where(user => !user.IsAdmin));
+  }
+  
+  private string GenerateJwtToken(string username, bool isAdmin)
   {
     var claims = new List<Claim>
     {
       new Claim(ClaimTypes.Name, username),
-      new Claim(ClaimTypes.Role, "Admin")
+      new Claim(ClaimTypes.Role, isAdmin ? "Admin" : "Default")
     };
 
     var key = new SymmetricSecurityKey(

@@ -56,7 +56,6 @@ builder.Services.AddAuthentication(options =>
   };
 });
 
-
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -65,12 +64,22 @@ if (app.Environment.IsDevelopment())
   app.UseSwagger();
   app.UseSwaggerUI(c =>
   {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "My API V1");
-    c.RoutePrefix = string.Empty;
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Authentication & Authorization API");
   });
 }
 
 app.UseHttpsRedirection();
+
+app.Use(async (context, next) =>
+{
+  if (context.Request.Cookies.ContainsKey("access_token"))
+  {
+    var token = context.Request.Cookies["access_token"];
+    context.Request.Headers.Append("Authorization", $"Bearer {token}");
+  }
+
+  await next();
+});
 
 app.UseAuthentication();
 
